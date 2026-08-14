@@ -1,0 +1,13 @@
+# dsh-file-explorer bundle patch: mounts the file-explorer plugin into the
+# host composition of a dsh profile. The host half registers the
+# /plugins/file-explorer/* HTTP routes (list / search / read / write /
+# open-vscode); the web client (dsh.client entry) renders the right-side
+# resizable file-explorer panel in shell.overlay plus the session-header
+# toggle button.
+#
+# Install: `dsh plugin --profile <name> add <this package>` (npm or a local
+# path). The `dsh plugin` command pnpm-installs the package into the profile
+# and reconciles it into the profile's `dsh.profile.bundles` layer list.
+- insert:
+    - id: file-explorer
+      name: dsh-file-explorer
