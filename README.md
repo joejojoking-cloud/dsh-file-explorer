@@ -1,5 +1,7 @@
 # dsh-file-explorer
 
+> **File Explorer for DeepSeek Harness** — right-side resizable file tree with Markdown rendering, syntax highlighting, in-panel editing, and one-click VS Code open. Install: `dsh plugin --profile web add dsh-file-explorer`.
+
 DeepSeek Harness 的全局文件资源管理器插件：在任何会话的标题栏右侧提供文件夹切换按钮，点击后在页面**右侧**打开可调宽度的文件树面板。
 
 ## 功能
