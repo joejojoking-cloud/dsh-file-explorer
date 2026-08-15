@@ -10,7 +10,7 @@ DeepSeek Harness 的全局文件资源管理器插件：在任何会话的标题
 - 标题栏：「文件」+ 五个图标 —— VS Code（在 VS Code 中打开整个工作区）、全部展开/折叠、刷新、编辑、关闭
 - 搜索框「搜索文件」：递归扫描工作区（跳过 `.git` / `node_modules`，最多 300 条）
 - 文件树：根目录默认展开，目录点击展开/折叠（懒加载），文件单击/双击打开预览
-- 预览：`.md` 渲染 Markdown（标题/列表/代码块/引用/链接），Markdown 代码块按围栏语言高亮；其他文本文件按扩展名自动语法高亮（JSON / YAML / JS / TS / Python / C / C++ / Java / Go / Rust / Shell / SQL / TOML / INI / CSS / HTML 等）；「编辑」图标进入可编辑模式，保存写回磁盘
+- 预览：`.md` 渲染 Markdown（标题/列表/代码块/引用/链接），Markdown 代码块按围栏语言高亮；其他文本文件按扩展名自动语法高亮（JSON / YAML / JS / TS / Python / C / C++ / Java / Go / Rust / Shell / SQL / TOML / INI / CSS / HTML 等）；「编辑」图标进入可编辑模式，保存写回磁盘；再次点击预览中的文件可关闭预览框
 - 超过 1 MB 的文件提示不支持预览
 
 ## 安装
