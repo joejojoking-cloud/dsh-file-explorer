@@ -27,8 +27,19 @@
  * template below; NEVER put backticks inside that template literal — that
  * backtick comment once terminated the template early, produced a
  * SyntaxError, and the loader reported "loaded without registering".
+ *
+ * i18n (2026-09-02): UI copy is registered as the 'file-explorer' locale
+ * namespace (src/client/locales.ts) and reaches components through the
+ * `t` prop the slots framework synthesizes for a 'locale: NS' registration
+ * (ExplorerPanel, ToggleButton). It follows whatever language DSH's own
+ * settings panel has active — this plugin owns no switcher UI. The shared
+ * store's `status` field holds { key, params } (or { raw } for opaque
+ * host/exception text) instead of a baked string, so a toast still shown
+ * mid-switch re-resolves through `t` on the next render instead of going
+ * stale.
  */
 import * as react from 'react'
+import { NS, zh, en } from './locales.js'
 
 
 		// ---------- styles ----------
@@ -304,13 +315,14 @@ html[data-fe-panel-open] [data-phase=active] {
 			}).then((r) => r.json()),
 		};
 
-		const inject = ["slots"];
+		const inject = ["slots", "locale"];
 
 		// Expand-all/collapse-all coordination, stable across renders (the panel
 		// is a single instance per page). A token bump cancels an in-flight run.
 		let expandToken = 0;
 		let expandBusy = false;
 		const MAX_EXPAND_DIRS = 500;
+		const SEARCH_TRUNC_LIMIT = 300;
 
 		// ---------- shared store (open/width/search/editor/status) ----------
 		const store = {
@@ -881,12 +893,13 @@ html[data-fe-panel-open] [data-phase=active] {
 		};
 
 		// ---------- header toggle button ----------
-		const ToggleButton = () => {
+		const ToggleButton = (props) => {
 			const s = useStore();
+			const t = props.t;
 			return react.createElement('button', {
 				className: 'fe-toggle' + (s.open ? ' fe-toggle-on' : ''),
-				title: '文件资源管理器',
-				'aria-label': '文件资源管理器',
+				title: t('panel.title'),
+				'aria-label': t('panel.title'),
 				onClick: toggleOpen,
 			}, react.createElement(Icon, { name: 'files', size: 15 }));
 		};
@@ -932,6 +945,18 @@ html[data-fe-panel-open] [data-phase=active] {
 		// ---------- main panel ----------
 		const ExplorerPanel = (props) => {
 			const s = useStore();
+			const t = props.t;
+			// Host routes (open-vscode/open-folder) send `code` on every known
+			// failure branch; resolve it against 'error.<code>' and fall back to
+			// the host's own `error` text (opaque, e.g. a raw exception message)
+			// or a generic key when the response carries neither.
+			const hostErrorStatus = (res) => {
+				if (res && res.code) {
+					return { ok: false, key: 'error.' + res.code, params: res.code === 'open-exit-code' ? { code: res.exitCode } : undefined };
+				}
+				if (res && res.error) return { ok: false, raw: res.error };
+				return { ok: false, key: 'error.unknown' };
+			};
 			const activeTab = s.tabs.find((t) => t.path === s.activePath) || null;
 			// `editor` = the tab currently VISIBLE in the preview pane; the
 			// tabs survive while the pane is hidden, so editor is null then.
@@ -1148,12 +1173,12 @@ html[data-fe-panel-open] [data-phase=active] {
 				const path = editor.path;
 				const content = editor.content;
 				api.write(path, content).then((res) => {
-					if (res && res.error) showStatus({ ok: false, text: '保存失败：' + res.error });
+					if (res && res.error) showStatus({ ok: false, key: 'error.saveFailed', params: { reason: res.error } });
 					else {
 						updateTab(path, (t) => ({ ...t, editing: false }));
-						showStatus({ ok: true, text: '已保存' });
+						showStatus({ ok: true, key: 'status.saved' });
 					}
-				}).catch((err) => showStatus({ ok: false, text: '保存失败：' + String((err && err.message) || err) }));
+				}).catch((err) => showStatus({ ok: false, key: 'error.saveFailed', params: { reason: String((err && err.message) || err) } }));
 			};
 
 			const refresh = () => {
@@ -1232,7 +1257,7 @@ html[data-fe-panel-open] [data-phase=active] {
 				work(tree.rootPath).then(() => {
 					expandBusy = false;
 					if (loaded >= MAX_EXPAND_DIRS) {
-						showStatus({ ok: false, text: '目录较多，已展开前 ' + MAX_EXPAND_DIRS + ' 个目录' });
+						showStatus({ ok: false, key: 'status.expandLimit', params: { count: MAX_EXPAND_DIRS } });
 					}
 				}).catch(() => { expandBusy = false });
 			};
@@ -1246,10 +1271,9 @@ html[data-fe-panel-open] [data-phase=active] {
 			const onVscode = () => {
 				if (!tree || !tree.rootPath) return;
 				api.openVscode(tree.rootPath).then((res) => {
-					showStatus(res && res.ok
-						? { ok: true, text: '已在 VS Code 中打开项目' }
-						: { ok: false, text: (res && res.error) || '打开失败（未检测到 code 命令）' });
-				}).catch((err) => showStatus({ ok: false, text: '打开失败：' + String((err && err.message) || err) }));
+					if (res && res.ok) showStatus({ ok: true, key: 'status.openedVscode' });
+					else showStatus(hostErrorStatus(res));
+				}).catch((err) => showStatus({ ok: false, key: 'error.openFailed', params: { reason: String((err && err.message) || err) } }));
 			};
 
 			// Opens the selected item in the OS file manager (host decides:
@@ -1259,10 +1283,9 @@ html[data-fe-panel-open] [data-phase=active] {
 				if (!tree || !tree.rootPath) return;
 				const target = tree.selected || tree.rootPath;
 				api.openFolder(target).then((res) => {
-					showStatus(res && res.ok
-						? { ok: true, text: tree.selected ? '已在系统文件浏览器中定位选中项' : '已在系统文件浏览器中打开项目' }
-						: { ok: false, text: (res && res.error) || '打开失败' });
-				}).catch((err) => showStatus({ ok: false, text: '打开失败：' + String((err && err.message) || err) }));
+					if (res && res.ok) showStatus({ ok: true, key: tree.selected ? 'status.revealedInFolder' : 'status.openedFolder' });
+					else showStatus(hostErrorStatus(res));
+				}).catch((err) => showStatus({ ok: false, key: 'error.openFailed', params: { reason: String((err && err.message) || err) } }));
 			};
 
 			const onResizeStart = (kind, e) => {
@@ -1282,7 +1305,7 @@ html[data-fe-panel-open] [data-phase=active] {
 			const endDrag = () => setDrag(null);
 
 			const renderTree = () => {
-				if (!tree || !tree.rootPath) return react.createElement('div', { className: 'fe-empty' }, '未找到当前工作区');
+				if (!tree || !tree.rootPath) return react.createElement('div', { className: 'fe-empty' }, t('tree.empty'));
 				const rows = [];
 				rows.push(react.createElement('div', {
 					key: 'root',
@@ -1310,9 +1333,9 @@ html[data-fe-panel-open] [data-phase=active] {
 			};
 
 			const renderSearch = () => {
-				if (s.searching && !s.matches) return react.createElement('div', { className: 'fe-empty' }, '搜索中…');
+				if (s.searching && !s.matches) return react.createElement('div', { className: 'fe-empty' }, t('search.searching'));
 				if (s.searchError) return react.createElement('div', { className: 'fe-node-error' }, s.searchError);
-				if (!s.matches || s.matches.length === 0) return react.createElement('div', { className: 'fe-empty' }, '没有匹配的文件');
+				if (!s.matches || s.matches.length === 0) return react.createElement('div', { className: 'fe-empty' }, t('search.noMatches'));
 				const rows = [];
 				for (const m of s.matches) {
 					const rel = m.path.slice(tree && tree.rootPath ? tree.rootPath.length : 0).replace(/^[\\/]+/, '');
@@ -1329,7 +1352,7 @@ html[data-fe-panel-open] [data-phase=active] {
 						react.createElement('span', { className: 'fe-node-rel' }, rel || '.'),
 					));
 				}
-				if (s.truncated) rows.push(react.createElement('div', { key: 'trunc', className: 'fe-node-error' }, '结果过多，已截断（前 300 条）'));
+				if (s.truncated) rows.push(react.createElement('div', { key: 'trunc', className: 'fe-node-error' }, t('search.truncated', { count: SEARCH_TRUNC_LIMIT })));
 				return rows;
 			};
 
@@ -1347,7 +1370,7 @@ html[data-fe-panel-open] [data-phase=active] {
 					react.createElement('span', { className: 'fe-tab-name' }, t.name),
 					react.createElement('span', {
 						className: 'fe-tab-close',
-						title: '关闭标签',
+						title: props.t('tab.close'),
 						onClick: (e) => { e.stopPropagation(); closeTab(t.path); setStatus(null) },
 					}, react.createElement(Icon, { name: 'close', size: 10 })),
 				));
@@ -1362,17 +1385,17 @@ html[data-fe-panel-open] [data-phase=active] {
 					react.createElement('span', { className: 'fe-editor-name', title: editor.name }, editor.name),
 					react.createElement('span', { className: 'fe-editor-path' }, editor.path),
 					isMd && editor.state === 'ready' && !editor.editing
-						? react.createElement('button', { className: 'fe-btn', onClick: () => updateTab(editor.path, (t) => ({ ...t, preview: !t.preview })) }, editor.preview ? '源码' : '预览')
+						? react.createElement('button', { className: 'fe-btn', onClick: () => updateTab(editor.path, (t) => ({ ...t, preview: !t.preview })) }, editor.preview ? t('action.viewSource') : t('action.viewPreview'))
 						: null,
 					editor.state === 'ready' && editor.editing
-						? react.createElement('button', { className: 'fe-btn', onClick: onSave }, '保存')
+						? react.createElement('button', { className: 'fe-btn', onClick: onSave }, t('action.save'))
 						: null,
-					react.createElement('button', { className: 'fe-btn', onClick: () => { closePreviewPane(); setStatus(null) } }, '收起预览'),
+					react.createElement('button', { className: 'fe-btn', onClick: () => { closePreviewPane(); setStatus(null) } }, t('action.collapsePreview')),
 				);
 				let body = null;
-				if (editor.state === 'loading') body = react.createElement('div', { className: 'fe-editor-msg' }, '加载中…');
+				if (editor.state === 'loading') body = react.createElement('div', { className: 'fe-editor-msg' }, t('editor.loading'));
 				else if (editor.state === 'error') body = react.createElement('div', { className: 'fe-editor-msg fe-err' }, editor.message);
-				else if (editor.state === 'too-large') body = react.createElement('div', { className: 'fe-editor-msg' }, '文件过大（' + fmtSize(editor.size) + '），不支持预览');
+				else if (editor.state === 'too-large') body = react.createElement('div', { className: 'fe-editor-msg' }, t('editor.tooLarge', { size: fmtSize(editor.size) }));
 				else if (showPreview) body = react.createElement('div', { className: 'fe-md', dangerouslySetInnerHTML: { __html: renderMarkdown(editor.content) } });
 				else if (!editor.editing) {
 					const lang = hlLangFor(editor.name);
@@ -1396,33 +1419,34 @@ html[data-fe-panel-open] [data-phase=active] {
 			// preview and tree; the leftmost pane's tab is on the chat edge.
 			const treeTab = react.createElement('button', {
 				className: 'fe-collapse-tab',
-				title: '收起文件树',
-				'aria-label': '收起文件树',
+				title: t('action.collapseTree'),
+				'aria-label': t('action.collapseTree'),
 				onClick: () => setOpen(false),
 			}, react.createElement(Icon, { name: 'chevronRight', size: 14 }));
 			const previewTab = react.createElement('button', {
 				className: 'fe-collapse-tab',
-				title: '收起文件预览（保留标签）',
-				'aria-label': '收起文件预览（保留标签）',
+				title: t('action.collapsePreviewKeepTabs'),
+				'aria-label': t('action.collapsePreviewKeepTabs'),
 				onClick: () => { closePreviewPane(); setStatus(null) },
 			}, react.createElement(Icon, { name: 'chevronRight', size: 14 }));
+			const statusText = status ? (status.raw != null ? status.raw : t(status.key, status.params)) : null;
 			const treePanel = s.open ? react.createElement('div', { className: 'fe-panel', style: { width: s.width + 'px' } },
-				react.createElement('div', { className: 'fe-resize', title: '拖动调整宽度', onPointerDown: (e) => onResizeStart('tree', e) }),
+				react.createElement('div', { className: 'fe-resize', title: t('action.resizeHint'), onPointerDown: (e) => onResizeStart('tree', e) }),
 				treeTab,
 				react.createElement('div', { className: 'fe-header' },
-					react.createElement('span', { className: 'fe-title' }, '文件'),
-					react.createElement('button', { className: 'fe-iconbtn fe-icon-vscode', title: '在 Visual Studio Code 中打开项目', onClick: onVscode }, react.createElement(Icon, { name: 'vscode', size: 15 })),
-					react.createElement('button', { className: 'fe-iconbtn', title: (tree && tree.selected) ? '在系统文件浏览器中定位选中项' : '在系统文件浏览器中打开项目', onClick: onOpenFolder }, react.createElement(Icon, { name: 'openInNew', size: 15 })),
-					react.createElement('button', { className: 'fe-iconbtn', title: '全部展开 / 全部折叠', onClick: toggleAll }, react.createElement(Icon, { name: 'chevronDown', size: 14 })),
-					react.createElement('button', { className: 'fe-iconbtn', title: '刷新', onClick: refresh }, react.createElement(Icon, { name: 'refresh', size: 14 })),
-					react.createElement('button', { className: 'fe-iconbtn' + (editor && editor.editing ? ' fe-iconbtn-on' : ''), title: '编辑', onClick: onEditClick }, react.createElement(Icon, { name: 'edit', size: 14 })),
-					react.createElement('button', { className: 'fe-iconbtn', title: '收起文件树', onClick: () => setOpen(false) }, react.createElement(Icon, { name: 'close', size: 14 })),
+					react.createElement('span', { className: 'fe-title' }, t('panel.filesLabel')),
+					react.createElement('button', { className: 'fe-iconbtn fe-icon-vscode', title: t('action.openInVscode'), onClick: onVscode }, react.createElement(Icon, { name: 'vscode', size: 15 })),
+					react.createElement('button', { className: 'fe-iconbtn', title: (tree && tree.selected) ? t('action.revealInFileManager') : t('action.openInFileManager'), onClick: onOpenFolder }, react.createElement(Icon, { name: 'openInNew', size: 15 })),
+					react.createElement('button', { className: 'fe-iconbtn', title: t('action.expandCollapseAll'), onClick: toggleAll }, react.createElement(Icon, { name: 'chevronDown', size: 14 })),
+					react.createElement('button', { className: 'fe-iconbtn', title: t('action.refresh'), onClick: refresh }, react.createElement(Icon, { name: 'refresh', size: 14 })),
+					react.createElement('button', { className: 'fe-iconbtn' + (editor && editor.editing ? ' fe-iconbtn-on' : ''), title: t('action.edit'), onClick: onEditClick }, react.createElement(Icon, { name: 'edit', size: 14 })),
+					react.createElement('button', { className: 'fe-iconbtn', title: t('action.collapseTree'), onClick: () => setOpen(false) }, react.createElement(Icon, { name: 'close', size: 14 })),
 				),
 				react.createElement('div', { className: 'fe-searchbar' },
-					react.createElement('input', { className: 'fe-search', type: 'text', placeholder: '搜索文件', value: s.query, spellCheck: false, onChange: (e) => setQuery(e.target.value) }),
+					react.createElement('input', { className: 'fe-search', type: 'text', placeholder: t('search.placeholder'), value: s.query, spellCheck: false, onChange: (e) => setQuery(e.target.value) }),
 					s.searching ? react.createElement('span', { className: 'fe-search-state' }, '…') : null,
 				),
-				status ? react.createElement('div', { className: 'fe-status ' + (status.ok ? 'fe-status-ok' : 'fe-status-err') }, status.text) : null,
+				status ? react.createElement('div', { className: 'fe-status ' + (status.ok ? 'fe-status-ok' : 'fe-status-err') }, statusText) : null,
 				react.createElement('div', { className: 'fe-tree' }, s.query.trim() ? renderSearch() : renderTree()),
 			) : null;
 			const previewPane = editor
@@ -1431,7 +1455,7 @@ html[data-fe-panel-open] [data-phase=active] {
 					// Dock to the right edge when the tree is collapsed.
 					style: { right: (s.open ? s.width : 0) + 'px', width: previewWidth + 'px', maxWidth: 'calc(100vw - ' + (s.open ? s.width : 0) + 'px - 12px)' },
 				},
-					react.createElement('div', { className: 'fe-preview-resize', title: '拖动调整宽度', onPointerDown: (e) => onResizeStart('preview', e) }),
+					react.createElement('div', { className: 'fe-preview-resize', title: t('action.resizeHint'), onPointerDown: (e) => onResizeStart('preview', e) }),
 					previewTab,
 					renderTabBar(),
 					renderPreview(),
@@ -1449,6 +1473,9 @@ html[data-fe-panel-open] [data-phase=active] {
 			styleEl.textContent = CSS;
 			document.head.appendChild(styleEl);
 			ctx.effect(() => () => { styleEl.remove() }, 'file-explorer: styles');
+
+			ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'file-explorer: dictionaries');
+			const t = ctx.locale.bind(NS);
 
 			// Double-click anywhere on the chat interface collapses BOTH the
 			// tree and the preview pane. The (a)/(b) project filter applies:
@@ -1482,11 +1509,11 @@ html[data-fe-panel-open] [data-phase=active] {
 			const slots = ctx.get('slots');
 			if (slots === undefined) return;
 			slots.inject('shell.overlay', () => slots.register(
-				{ name: 'shell.overlay', id: 'file-explorer', order: 90, label: '文件资源管理器' },
+				{ name: 'shell.overlay', id: 'file-explorer', order: 90, locale: NS, label: () => t('panel.title') },
 				(props) => react.createElement(ExplorerPanel, props),
 			));
 			slots.inject('conversation.session.header.actions', () => slots.register(
-				{ name: 'conversation.session.header.actions', id: 'file-explorer-toggle', order: 30, label: '文件资源管理器' },
+				{ name: 'conversation.session.header.actions', id: 'file-explorer-toggle', order: 30, locale: NS, label: () => t('panel.title') },
 				(props) => react.createElement(ToggleButton, props),
 			));
 		}
