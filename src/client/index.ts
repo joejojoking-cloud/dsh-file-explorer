@@ -283,23 +283,25 @@ html[data-fe-panel-open] [data-phase=active] {
 `;
 
 		// ---------- fetch API (same origin as the GUI) ----------
+		// Every request carries the plugin header the host requires.
+		const PLUGIN_HEADERS = { 'x-dsh-file-explorer': '1' };
 		const api = {
-			list: (path) => fetch('/plugins/file-explorer/list?path=' + encodeURIComponent(path)).then((r) => r.json()),
-			search: (root, q) => fetch('/plugins/file-explorer/search?root=' + encodeURIComponent(root) + '&q=' + encodeURIComponent(q)).then((r) => r.json()),
-			read: (path) => fetch('/plugins/file-explorer/read?path=' + encodeURIComponent(path)).then((r) => r.json()),
+			list: (path) => fetch('/plugins/file-explorer/list?path=' + encodeURIComponent(path), { headers: PLUGIN_HEADERS }).then((r) => r.json()),
+			search: (root, q) => fetch('/plugins/file-explorer/search?root=' + encodeURIComponent(root) + '&q=' + encodeURIComponent(q), { headers: PLUGIN_HEADERS }).then((r) => r.json()),
+			read: (path) => fetch('/plugins/file-explorer/read?path=' + encodeURIComponent(path), { headers: PLUGIN_HEADERS }).then((r) => r.json()),
 			write: (path, content) => fetch('/plugins/file-explorer/write', {
 				method: 'POST',
-				headers: { 'content-type': 'application/json' },
+				headers: { 'content-type': 'application/json', ...PLUGIN_HEADERS },
 				body: JSON.stringify({ path, content }),
 			}).then((r) => r.json()),
 			openVscode: (path) => fetch('/plugins/file-explorer/open-vscode', {
 				method: 'POST',
-				headers: { 'content-type': 'application/json' },
+				headers: { 'content-type': 'application/json', ...PLUGIN_HEADERS },
 				body: JSON.stringify({ path }),
 			}).then((r) => r.json()),
 			openFolder: (path) => fetch('/plugins/file-explorer/open-folder', {
 				method: 'POST',
-				headers: { 'content-type': 'application/json' },
+				headers: { 'content-type': 'application/json', ...PLUGIN_HEADERS },
 				body: JSON.stringify({ path }),
 			}).then((r) => r.json()),
 		};

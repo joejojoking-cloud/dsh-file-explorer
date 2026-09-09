@@ -13,7 +13,7 @@ import { apply } from '../lib/index.js'
  * the path string — the route must use processPath, never the raw object.
  */
 
-const build = ({ subprocess, shell, entries = {} } = {}) => {
+const build = ({ subprocess, shell, entries = {}, roots = ['/'] } = {}) => {
   const routes = new Map()
   const ctx = {
     fs: {
@@ -28,6 +28,7 @@ const build = ({ subprocess, shell, entries = {} } = {}) => {
       if (name === 'webServer') return { register: (o) => routes.set(o.path, o.handler) }
       if (name === 'subprocess') return subprocess
       if (name === 'shell') return shell
+      if (name === 'workspaceRegistry') return { list: () => roots.map((p) => ({ path: () => p })) }
       return undefined
     },
     effect: (fn) => { fn(); return () => {} },
@@ -37,10 +38,11 @@ const build = ({ subprocess, shell, entries = {} } = {}) => {
   return routes
 }
 
-const post = (routes, body) => new Promise((resolve, reject) => {
+const post = (routes, body, extraHeaders = {}) => new Promise((resolve, reject) => {
   const handler = routes.get('/plugins/file-explorer/open-folder')
   const req = {
     method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-dsh-file-explorer': '1', ...extraHeaders },
     url: '/plugins/file-explorer/open-folder',
     [Symbol.asyncIterator]() {
       const chunk = Buffer.from(body === undefined ? 'not-json' : JSON.stringify(body))
@@ -181,10 +183,58 @@ test('linux: opens the parent directory of a file with xdg-open', async () => {
 })
 
 test('reports 500 when launching throws', async () => {
-  const { subprocess } = recordSubprocess({ explorer: 'C:\\Windows\\explorer.exe' }, 0)
-  subprocess.spawn = () => { throw new Error('boom') }
-  const routes = build({ subprocess, entries: { 'C:\\proj': { type: 'directory' } } })
-  const res = await post(routes, { path: 'C:\\proj' })
-  assert.equal(res.status, 500)
-  assert.equal(res.body.ok, false)
+  await withPlatform('win32', async () => {
+    const { subprocess } = recordSubprocess({ explorer: 'C:\\Windows\\explorer.exe' }, 0)
+    subprocess.spawn = () => { throw new Error('boom') }
+    const routes = build({ subprocess, entries: { 'C:\\proj': { type: 'directory' } } })
+    const res = await post(routes, { path: 'C:\\proj' })
+    assert.equal(res.status, 500)
+    assert.equal(res.body.ok, false)
+  })
+})
+
+// ---------- local hardening (vendored fork) ----------
+
+test('confinement: rejects a target outside the registered workspace roots', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, roots: ['/srv/proj'], entries: { '/etc/hostname': { type: 'file' } } })
+  const res = await post(routes, { path: '/etc/hostname' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error, 'path outside workspace')
+})
+
+test('confinement: allows a target inside a registered workspace root', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, roots: ['/srv/proj'], entries: { '/srv/proj': { type: 'directory' } } })
+  const res = await post(routes, { path: '/srv/proj' })
+  assert.equal(res.status, 200)
+})
+
+test('csrf: rejects a cross-origin POST', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, entries: { '/srv/proj': { type: 'directory' } } })
+  const res = await post(routes, { path: '/srv/proj' }, { origin: 'https://evil.example' })
+  assert.equal(res.status, 403)
+})
+
+test('csrf: rejects a non-json content type', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, entries: { '/srv/proj': { type: 'directory' } } })
+  const res = await post(routes, { path: '/srv/proj' }, { 'content-type': 'text/plain' })
+  assert.equal(res.status, 415)
+})
+
+test('csrf: allows a same-origin JSON POST', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, entries: { '/srv/proj': { type: 'directory' } } })
+  const res = await post(routes, { path: '/srv/proj' }, { origin: 'http://127.0.0.1:3080', host: '127.0.0.1:3080' })
+  assert.equal(res.status, 200)
+})
+
+test('plugin header: a request without it is rejected', async () => {
+  const { subprocess } = recordSubprocess({ 'xdg-open': '/usr/bin/xdg-open' }, 0)
+  const routes = build({ subprocess, entries: { '/srv/proj': { type: 'directory' } } })
+  const res = await post(routes, { path: '/srv/proj' }, { 'x-dsh-file-explorer': '0' })
+  assert.equal(res.status, 403)
+  assert.equal(res.body.error, 'missing plugin header')
 })
