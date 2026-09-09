@@ -441,15 +441,22 @@ html[data-fe-panel-open] [data-phase=active] {
 
 		// ---------- markdown ----------
 		const isMarkdown = (name) => /\.(md|markdown|mdown|mkd)$/i.test(name);
-		const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+		const escapeHtml = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 		const mdInline = (s) => {
 			let t = escapeHtml(s);
-			t = t.replace(/`([^`\n]+)`/g, (m, c) => '<code>' + c + '</code>');
+			// Inline code must stay literal, so its spans are parked in NUL
+			// placeholders while the other inline rules run, then restored.
+			const code = [];
+			t = t.replace(/`([^`\n]+)`/g, (m, c) => {
+				code.push('<code>' + c + '</code>');
+				return '\u0000' + (code.length - 1) + '\u0000';
+			});
 			t = t.replace(/\*\*([^*]+)\*\*/g, (m, c) => '<strong>' + c + '</strong>');
 			t = t.replace(/~~([^~]+)~~/g, (m, c) => '<del>' + c + '</del>');
 			t = t.replace(/\*([^*\s][^*]*)\*/g, (m, c) => '<em>' + c + '</em>');
-			t = t.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, src) => '<img src="' + src + '" alt="' + alt + '" />');
-			t = t.replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, (m, txt, href) => '<a href="' + href + '" target="_blank" rel="noreferrer">' + txt + '</a>');
+			t = t.replace(/!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (m, alt, src) => '<img src="' + src + '" alt="' + alt + '" loading="lazy" referrerpolicy="no-referrer" />');
+			t = t.replace(/(?<!!)\[([^\]]+)\]\(([^)\s]+)\)/g, (m, txt, href) => /^(?:javascript|data|vbscript|blob|file):/i.test(String(href).replace(/[\u0000-\u0020\u007f]+/g, '')) ? '<span>' + txt + '</span>' : '<a href="' + href + '" target="_blank" rel="noreferrer" referrerpolicy="no-referrer">' + txt + '</a>');
+			t = t.replace(/\u0000(\d+)\u0000/g, (m, i) => code[Number(i)]);
 			return t;
 		};
 		const itemContent = (content) => {
