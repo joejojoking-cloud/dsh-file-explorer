@@ -14,6 +14,7 @@
  *
  * @module dsh-file-explorer
  */
+import { lstat } from 'node:fs/promises'
 import { dirname } from 'node:path'
 export const name = 'file-explorer'
 export const inject = ['fs']
@@ -74,14 +75,29 @@ export function apply(ctx) {
           return
         }
         const entries = await fs.listDir(target)
-        send(res, 200, {
-          entries: entries.map((e) => ({
+        // mtime is not part of the fs stat contract, so it is read directly.
+        // Capped, so one listing of a huge directory cannot turn into thousands
+        // of extra syscalls; a missing value just means "cannot sort by date".
+        const wantMtime = entries.length <= 2000
+        const listed = await Promise.all(entries.map(async (e) => {
+          const entryPath = fs.processPath(e.target)
+          let mtime = null
+          if (wantMtime) {
+            try {
+              mtime = (await lstat(entryPath)).mtimeMs
+            } catch {
+              /* keep null */
+            }
+          }
+          return {
             name: e.name,
             type: e.type,
             size: typeof e.size === 'number' ? e.size : null,
-            path: fs.processPath(e.target),
-          })),
-        })
+            path: entryPath,
+            mtime,
+          }
+        }))
+        send(res, 200, { entries: listed })
       } catch (err) {
         send(res, 500, { error: message(err) })
       }
