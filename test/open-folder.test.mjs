@@ -181,10 +181,12 @@ test('linux: opens the parent directory of a file with xdg-open', async () => {
 })
 
 test('reports 500 when launching throws', async () => {
-  const { subprocess } = recordSubprocess({ explorer: 'C:\\Windows\\explorer.exe' }, 0)
-  subprocess.spawn = () => { throw new Error('boom') }
-  const routes = build({ subprocess, entries: { 'C:\\proj': { type: 'directory' } } })
-  const res = await post(routes, { path: 'C:\\proj' })
-  assert.equal(res.status, 500)
-  assert.equal(res.body.ok, false)
+  await withPlatform('win32', async () => {
+    const { subprocess } = recordSubprocess({ explorer: 'C:\\Windows\\explorer.exe' }, 0)
+    subprocess.spawn = () => { throw new Error('boom') }
+    const routes = build({ subprocess, entries: { 'C:\\proj': { type: 'directory' } } })
+    const res = await post(routes, { path: 'C:\\proj' })
+    assert.equal(res.status, 500)
+    assert.equal(res.body.ok, false)
+  })
 })
