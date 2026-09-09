@@ -1131,6 +1131,18 @@ html[data-fe-panel-open] [data-phase=active] {
 				return t && t.rootPath ? walk(t.rootPath) : null;
 			};
 
+			// The edit button is only meaningful with a loaded file, or with a
+			// file (not a folder) selected in the tree; otherwise it used to
+			// no-op silently, which reads as "broken".
+			const editableSelection = () => {
+				if (editor && editor.state === 'ready') return true;
+				if (!editor && tree && tree.selected) {
+					const sel = findEntry(tree, tree.selected);
+					return !!(sel && sel.type !== 'directory');
+				}
+				return false;
+			};
+			const canEdit = editableSelection();
 			const onEditClick = () => {
 				setStatus(null);
 				if (editor && editor.state === 'ready') {
@@ -1415,7 +1427,7 @@ html[data-fe-panel-open] [data-phase=active] {
 					react.createElement('button', { className: 'fe-iconbtn', title: (tree && tree.selected) ? '在系统文件浏览器中定位选中项' : '在系统文件浏览器中打开项目', onClick: onOpenFolder }, react.createElement(Icon, { name: 'openInNew', size: 15 })),
 					react.createElement('button', { className: 'fe-iconbtn', title: '全部展开 / 全部折叠', onClick: toggleAll }, react.createElement(Icon, { name: 'chevronDown', size: 14 })),
 					react.createElement('button', { className: 'fe-iconbtn', title: '刷新', onClick: refresh }, react.createElement(Icon, { name: 'refresh', size: 14 })),
-					react.createElement('button', { className: 'fe-iconbtn' + (editor && editor.editing ? ' fe-iconbtn-on' : ''), title: '编辑', onClick: onEditClick }, react.createElement(Icon, { name: 'edit', size: 14 })),
+					react.createElement('button', { className: 'fe-iconbtn' + (editor && editor.editing ? ' fe-iconbtn-on' : ''), title: '编辑', disabled: !canEdit, style: canEdit ? undefined : { opacity: 0.35, cursor: 'default' }, onClick: onEditClick }, react.createElement(Icon, { name: 'edit', size: 14 })),
 					react.createElement('button', { className: 'fe-iconbtn', title: '收起文件树', onClick: () => setOpen(false) }, react.createElement(Icon, { name: 'close', size: 14 })),
 				),
 				react.createElement('div', { className: 'fe-searchbar' },
