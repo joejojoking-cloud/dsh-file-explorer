@@ -937,21 +937,33 @@ html[data-fe-panel-open] [data-phase=active] {
 			// tabs survive while the pane is hidden, so editor is null then.
 			const editor = s.previewOpen ? activeTab : null;
 			const status = s.status;
-			const currentSessionId = props.useSessions((st) => st.current);
 			const wsItems = props.useWorkspaces((st) => st.items);
-			const recentWorkspaceId = props.useWorkspaces((st) => st.recentWorkspaceId);
+			// 0.1.6 dropped the single `current` session field, and `recentWorkspaceId`
+			// went with it, so both of the selectors this used to read returned undefined
+			// and the tree fell through to the first workspace, which pinned it to
+			// whichever project was opened first. On 0.1.6 the session shown in the main
+			// view is the one that view retains, which is how the harness resolves it too;
+			// older hosts still answer through `current`.
+			const currentSessionId = props.useSessions((st) =>
+				st.current
+				?? Object.values(st.byId ?? {}).find((s: any) => ((s.retainedBy && s.retainedBy.mainView) || 0) > 0)?.id
+				?? null);
+			const sessionCwd = props.useSessions((st) =>
+				currentSessionId === null ? null : st.byId?.[currentSessionId]?.cwd ?? null);
 
 			let rootPath = null;
 			let rootName = '';
-			if (currentSessionId) {
+			if (currentSessionId !== null) {
 				for (const w of wsItems) {
 					if (w.sessionIds.indexOf(currentSessionId) >= 0) { rootPath = w.path; rootName = w.title; break }
 				}
 			}
-			if (!rootPath && recentWorkspaceId) {
-				for (const w of wsItems) {
-					if (w.workspaceId === recentWorkspaceId) { rootPath = w.path; rootName = w.title; break }
-				}
+			if (!rootPath && sessionCwd) {
+				// The session's own directory is the workspace root even while the
+				// workspace list is still catching up with a brand new project.
+				rootPath = sessionCwd;
+				const match = wsItems.find((w) => w.path === sessionCwd);
+				rootName = match ? match.title : String(sessionCwd).split('/').filter(Boolean).pop() || sessionCwd;
 			}
 			if (!rootPath && wsItems.length > 0) { rootPath = wsItems[0].path; rootName = wsItems[0].title }
 
